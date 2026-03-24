@@ -1,5 +1,5 @@
-// Windows: hide console window when running as tray app
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+// Windows: hide console window (tray app)
+#![windows_subsystem = "windows"]
 
 mod config;
 mod server;
