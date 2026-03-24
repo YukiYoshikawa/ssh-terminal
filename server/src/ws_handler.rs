@@ -2,9 +2,11 @@ use axum::extract::ws::{Message, WebSocket};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use futures::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::{error, info, warn};
 
+use crate::config::ServerConfig;
 use crate::ssh_session::SshSession;
 
 // ── Protocol types ──────────────────────────────────────────────────────────
@@ -16,8 +18,11 @@ pub enum ClientMessage {
     Connect {
         host: String,
         port: Option<u16>,
-        username: String,
-        password: String,
+        username: Option<String>,
+        password: Option<String>,
+        profile: Option<String>,
+        targets: Option<Vec<String>>, // jump host targets
+        command: Option<String>,      // auto-send command after shell starts
         cols: Option<u32>,
         rows: Option<u32>,
     },
@@ -35,7 +40,7 @@ pub enum ClientMessage {
 #[derive(Debug, Serialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum ServerMessage {
-    Connected,
+    Connected { session_id: Option<String> },
     Data { data: String },
     Error { message: String },
     Disconnected,
@@ -51,7 +56,7 @@ fn encode(msg: &ServerMessage) -> Message {
 
 // ── Handler ──────────────────────────────────────────────────────────────────
 
-pub async fn handle_websocket(socket: WebSocket) {
+pub async fn handle_websocket(socket: WebSocket, config: Arc<ServerConfig>) {
     let (mut ws_tx, mut ws_rx) = socket.split();
 
     // ── Step 1: Wait for the initial "connect" message ───────────────────
@@ -89,26 +94,72 @@ pub async fn handle_websocket(socket: WebSocket) {
         }
     };
 
-    // ── Step 2: Establish SSH connection ─────────────────────────────────
-    let (host, port, username, password, cols, rows) = match connect_msg {
+    // ── Step 2: Resolve credentials ──────────────────────────────────────
+    let (host, port, username, password, cols, rows, auto_command) = match connect_msg {
         ClientMessage::Connect {
             host,
             port,
             username,
             password,
+            profile,
+            targets: _,
+            command,
             cols,
             rows,
-        } => (
-            host,
-            port.unwrap_or(22),
-            username,
-            password,
-            cols.unwrap_or(80),
-            rows.unwrap_or(24),
-        ),
+        } => {
+            // Resolve credentials: profile takes precedence if given
+            let (resolved_user, resolved_pass, resolved_port) = if let Some(profile_name) = profile {
+                match config.get_profile(&profile_name) {
+                    Some(p) => (p.username.clone(), p.password.clone(), port.unwrap_or(p.port)),
+                    None => {
+                        let _ = ws_tx
+                            .send(encode(&ServerMessage::Error {
+                                message: format!("Profile '{}' not found", profile_name),
+                            }))
+                            .await;
+                        return;
+                    }
+                }
+            } else {
+                let u = match username {
+                    Some(u) => u,
+                    None => {
+                        let _ = ws_tx
+                            .send(encode(&ServerMessage::Error {
+                                message: "username or profile required".into(),
+                            }))
+                            .await;
+                        return;
+                    }
+                };
+                let p = match password {
+                    Some(p) => p,
+                    None => {
+                        let _ = ws_tx
+                            .send(encode(&ServerMessage::Error {
+                                message: "password or profile required".into(),
+                            }))
+                            .await;
+                        return;
+                    }
+                };
+                (u, p, port.unwrap_or(22))
+            };
+
+            (
+                host,
+                resolved_port,
+                resolved_user,
+                resolved_pass,
+                cols.unwrap_or(80),
+                rows.unwrap_or(24),
+                command,
+            )
+        }
         _ => unreachable!(),
     };
 
+    // ── Step 3: Establish SSH connection ─────────────────────────────────
     let session = match SshSession::connect(&host, port, &username, &password, cols, rows).await {
         Ok(s) => s,
         Err(e) => {
@@ -123,18 +174,32 @@ pub async fn handle_websocket(socket: WebSocket) {
     };
 
     // Notify the browser that we're connected
-    if ws_tx.send(encode(&ServerMessage::Connected)).await.is_err() {
+    if ws_tx
+        .send(encode(&ServerMessage::Connected { session_id: None }))
+        .await
+        .is_err()
+    {
         session.close().await;
         return;
     }
 
     info!("SSH session established for {}@{}:{}", username, host, port);
 
-    // ── Step 3: Channels ─────────────────────────────────────────────────
+    // ── Step 4: Channels ─────────────────────────────────────────────────
     // SSH output → WebSocket
     let (ssh_out_tx, mut ssh_out_rx) = mpsc::unbounded_channel::<Vec<u8>>();
     // Commands from WebSocket input → SSH session owner task
     let (cmd_tx, mut cmd_rx) = mpsc::unbounded_channel::<SshCommand>();
+
+    // If an auto-command was provided (e.g. "ssh target\n"), send it immediately
+    if let Some(ref cmd) = auto_command {
+        let mut bytes = cmd.as_bytes().to_vec();
+        // Ensure it ends with a newline
+        if !bytes.ends_with(b"\n") {
+            bytes.push(b'\n');
+        }
+        let _ = cmd_tx.send(SshCommand::Data(bytes));
+    }
 
     // ── SSH owner task: drives reads AND writes ──────────────────────────
     let ssh_task = tokio::spawn(async move {
@@ -184,7 +249,7 @@ pub async fn handle_websocket(socket: WebSocket) {
         let _ = ws_tx.send(encode(&ServerMessage::Disconnected)).await;
     });
 
-    // ── Step 4: WebSocket → SSH (main loop) ──────────────────────────────
+    // ── Step 5: WebSocket → SSH (main loop) ──────────────────────────────
     while let Some(msg) = ws_rx.next().await {
         match msg {
             Ok(Message::Text(text)) => {
@@ -215,7 +280,7 @@ pub async fn handle_websocket(socket: WebSocket) {
         }
     }
 
-    // ── Step 5: Clean up ─────────────────────────────────────────────────
+    // ── Step 6: Clean up ─────────────────────────────────────────────────
     let _ = cmd_tx.send(SshCommand::Close);
     let _ = tokio::join!(ssh_task, ws_write_task);
     info!("WebSocket session closed for {}@{}:{}", username, host, port);

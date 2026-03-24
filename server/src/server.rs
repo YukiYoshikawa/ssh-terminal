@@ -1,18 +1,35 @@
 use axum::{
-    extract::WebSocketUpgrade,
+    extract::{State, WebSocketUpgrade},
     response::IntoResponse,
     routing::get,
     Router,
 };
+use std::sync::Arc;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::services::{ServeDir, ServeFile};
 use tracing::info;
 use tokio::sync::watch;
 use std::path::PathBuf;
+
+use crate::config::ServerConfig;
 use crate::ws_handler::handle_websocket;
 
-async fn ws_route(ws: WebSocketUpgrade) -> impl IntoResponse {
-    ws.on_upgrade(handle_websocket)
+async fn ws_route(
+    ws: WebSocketUpgrade,
+    State(config): State<Arc<ServerConfig>>,
+) -> impl IntoResponse {
+    ws.on_upgrade(move |socket| handle_websocket(socket, config))
+}
+
+async fn list_profiles(State(config): State<Arc<ServerConfig>>) -> impl IntoResponse {
+    let mut names: Vec<String> = config.profiles.keys().cloned().collect();
+    names.sort();
+    axum::Json(names)
+}
+
+async fn get_config_path() -> impl IntoResponse {
+    let path = ServerConfig::config_file_path();
+    axum::Json(path.to_string_lossy().to_string())
 }
 
 fn find_dist_dir() -> Option<PathBuf> {
@@ -47,14 +64,19 @@ fn find_dist_dir() -> Option<PathBuf> {
     None
 }
 
-pub async fn run_server(bind_addr: String, mut shutdown_rx: watch::Receiver<bool>) {
+pub async fn run_server(config: ServerConfig, bind_addr: String, mut shutdown_rx: watch::Receiver<bool>) {
     let cors = CorsLayer::new()
         .allow_origin(Any)
         .allow_methods(Any)
         .allow_headers(Any);
 
+    let config = Arc::new(config);
+
     let mut app = Router::new()
-        .route("/ws", get(ws_route));
+        .route("/ws", get(ws_route))
+        .route("/api/profiles", get(list_profiles))
+        .route("/api/config-path", get(get_config_path))
+        .with_state(config);
 
     // Serve frontend static files if dist/ exists
     if let Some(dist_dir) = find_dist_dir() {

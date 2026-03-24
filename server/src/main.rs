@@ -8,7 +8,7 @@ mod tray;
 mod ws_handler;
 
 use config::ServerConfig;
-use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+use std::sync::{Arc, atomic::AtomicBool};
 use tokio::sync::{mpsc, watch};
 use tray::{TrayCommand, run_tray};
 
@@ -21,14 +21,14 @@ fn main() {
         )
         .init();
 
-    let mut cfg = ServerConfig::load();
+    let cfg = ServerConfig::load();
     let running = Arc::new(AtomicBool::new(true));
     let (cmd_tx, mut cmd_rx) = mpsc::unbounded_channel::<TrayCommand>();
 
     // Start tokio runtime in a background thread
-    let running_clone = running.clone();
     let initial_port = cfg.port;
     let initial_addr = cfg.bind_addr();
+    let initial_cfg = cfg.clone();
 
     std::thread::spawn(move || {
         let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
@@ -41,8 +41,9 @@ fn main() {
             let mut server_handle = {
                 let addr = current_addr.clone();
                 let rx = current_shutdown_tx.subscribe();
+                let cfg = initial_cfg.clone();
                 Some(tokio::spawn(async move {
-                    server::run_server(addr, rx).await;
+                    server::run_server(cfg, addr, rx).await;
                 }))
             };
 
@@ -54,8 +55,9 @@ fn main() {
                             let (tx, rx) = watch::channel(false);
                             current_shutdown_tx = tx;
                             let addr = current_addr.clone();
+                            let cfg = ServerConfig::load();
                             server_handle = Some(tokio::spawn(async move {
-                                server::run_server(addr, rx).await;
+                                server::run_server(cfg, addr, rx).await;
                             }));
                             tracing::info!("Server started on {}", current_addr);
                         }
@@ -84,7 +86,7 @@ fn main() {
                         current_shutdown_tx = tx;
                         let addr = current_addr.clone();
                         server_handle = Some(tokio::spawn(async move {
-                            server::run_server(addr, rx).await;
+                            server::run_server(cfg, addr, rx).await;
                         }));
                         tracing::info!("Server restarted on port {}", port);
                     }
