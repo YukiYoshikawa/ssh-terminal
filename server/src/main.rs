@@ -12,7 +12,36 @@ use std::sync::{Arc, atomic::AtomicBool};
 use tokio::sync::{mpsc, watch};
 use tray::{TrayCommand, run_tray};
 
+/// Prevent multiple instances using a Windows named mutex.
+/// Returns the handle (must be kept alive for the lifetime of the process).
+fn acquire_single_instance_lock() -> Option<windows_sys::Win32::Foundation::HANDLE> {
+    use windows_sys::Win32::Foundation::GetLastError;
+    use windows_sys::Win32::System::Threading::CreateMutexW;
+    const ERROR_ALREADY_EXISTS: u32 = 183;
+
+    let name: Vec<u16> = "Global\\SshTerminalProxy\0".encode_utf16().collect();
+    let handle = unsafe { CreateMutexW(std::ptr::null(), 1, name.as_ptr()) };
+    if handle.is_null() || unsafe { GetLastError() } == ERROR_ALREADY_EXISTS {
+        return None;
+    }
+    Some(handle)
+}
+
 fn main() {
+    // Single instance guard
+    let _mutex = match acquire_single_instance_lock() {
+        Some(h) => h,
+        None => {
+            // Another instance is already running.
+            // Show a message box since the console may be hidden.
+            use windows_sys::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONINFORMATION, MB_OK};
+            let text: Vec<u16> = "SSH Terminal Proxy は既に起動しています。\0".encode_utf16().collect();
+            let caption: Vec<u16> = "SSH Terminal Proxy\0".encode_utf16().collect();
+            unsafe { MessageBoxW(std::ptr::null_mut(), text.as_ptr(), caption.as_ptr(), MB_ICONINFORMATION | MB_OK) };
+            return;
+        }
+    };
+
     // Initialize logging
     tracing_subscriber::fmt()
         .with_env_filter(
