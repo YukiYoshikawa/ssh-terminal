@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Search, ChevronUp, ChevronDown, X } from 'lucide-react';
-import { searchBuffer } from '../core/keygen';
 import styles from './SearchBar.module.css';
 
 interface SearchBarProps {
@@ -33,7 +32,7 @@ export function SearchBar({ visible, onClose, getBuffer }: SearchBarProps) {
   }, [visible]);
 
   const runSearch = useCallback(
-    async (value: string, cs: boolean) => {
+    (value: string, cs: boolean) => {
       if (!value) {
         setMatches([]);
         setCurrentIndex(0);
@@ -43,7 +42,18 @@ export function SearchBar({ visible, onClose, getBuffer }: SearchBarProps) {
         const buffer = getBuffer();
         // If not regex mode, escape special regex characters
         const effectivePattern = useRegex ? value : value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const results = await searchBuffer(buffer, effectivePattern, cs);
+        const flags = cs ? 'g' : 'gi';
+        const re = new RegExp(effectivePattern, flags);
+        const results: SearchMatch[] = [];
+        const lines = buffer.split('\n');
+        lines.forEach((lineText, lineIdx) => {
+          re.lastIndex = 0;
+          let m: RegExpExecArray | null;
+          while ((m = re.exec(lineText)) !== null) {
+            results.push({ line: lineIdx, start: m.index, end: m.index + m[0].length, text: m[0] });
+            if (!re.global) break;
+          }
+        });
         setMatches(results);
         setCurrentIndex(results.length > 0 ? 0 : -1);
       } catch {
@@ -58,7 +68,7 @@ export function SearchBar({ visible, onClose, getBuffer }: SearchBarProps) {
     setPattern(value);
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
-      runSearch(value, caseSensitive);
+      void runSearch(value, caseSensitive);
     }, 300);
   };
 
@@ -67,7 +77,7 @@ export function SearchBar({ visible, onClose, getBuffer }: SearchBarProps) {
     setCaseSensitive(next);
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
-      runSearch(pattern, next);
+      void runSearch(pattern, next);
     }, 0);
   };
 
@@ -76,7 +86,7 @@ export function SearchBar({ visible, onClose, getBuffer }: SearchBarProps) {
     // Re-run search after state update
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
-      runSearch(pattern, caseSensitive);
+      void runSearch(pattern, caseSensitive);
     }, 0);
   };
 

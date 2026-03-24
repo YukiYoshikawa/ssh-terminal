@@ -8,7 +8,6 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "wasm:build": "cd wasm && wasm-pack build --target web --out-dir pkg",
     "server": "cd server && cargo run"
   },
   "dependencies": {

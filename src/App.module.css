@@ -19,6 +19,27 @@
   display: flex;
 }
 
+.expandBtn {
+  position: absolute;
+  left: 0;
+  top: calc(var(--header-height) + 8px);
+  z-index: 10;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-left: none;
+  border-radius: 0 4px 4px 0;
+  color: var(--text-secondary);
+  padding: 8px 4px;
+  cursor: pointer;
+  font-size: 10px;
+  transition: background var(--transition), color var(--transition);
+}
+
+.expandBtn:hover {
+  background: var(--bg-surface);
+  color: var(--accent);
+}
+
 .emptyState {
   flex: 1;
   display: flex;

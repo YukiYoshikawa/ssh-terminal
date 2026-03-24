@@ -162,92 +162,71 @@
   to { transform: rotate(360deg); }
 }
 
-/* SSH Key Generation Section */
-.keygenSection {
-  margin-top: 20px;
-  padding-top: 16px;
-  border-top: 1px solid var(--border);
+/* Connection History */
+.historySection {
+  margin-bottom: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border);
 }
 
-.keygenHeader {
+.historyTitle {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  margin-bottom: 10px;
-}
-
-.keygenTitle {
+  gap: 6px;
   font-size: 11px;
   font-weight: 500;
   color: var(--text-secondary);
   text-transform: uppercase;
   letter-spacing: 0.06em;
+  margin-bottom: 8px;
 }
 
-.keygenBtn {
-  padding: 5px 12px;
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  color: var(--text-secondary);
-  font-size: 12px;
-  cursor: pointer;
-  transition: background var(--transition), color var(--transition), border-color var(--transition);
-  display: flex;
-  align-items: center;
-  gap: 5px;
-}
-
-.keygenBtn:hover:not(:disabled) {
-  background: var(--bg-panel);
-  color: var(--text-primary);
-  border-color: var(--accent);
-}
-
-.keygenBtn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.keyResult {
+.historyList {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 2px;
+  max-height: 120px;
+  overflow-y: auto;
 }
 
-.keyTextarea {
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 7px 10px;
-  color: var(--text-primary);
-  font-size: 11px;
-  font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  outline: none;
-  resize: none;
-  width: 100%;
-  word-break: break-all;
-}
-
-.keyActions {
+.historyItem {
   display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.downloadBtn {
-  padding: 5px 12px;
-  background: rgba(74, 158, 255, 0.12);
-  border: 1px solid rgba(74, 158, 255, 0.3);
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
   border-radius: 4px;
-  color: var(--accent);
-  font-size: 12px;
   cursor: pointer;
-  transition: background var(--transition), border-color var(--transition);
-  flex: 1;
+  transition: background var(--transition);
 }
 
-.downloadBtn:hover {
-  background: rgba(74, 158, 255, 0.22);
-  border-color: rgba(74, 158, 255, 0.5);
+.historyItem:hover {
+  background: var(--bg-panel);
 }
+
+.historyLabel {
+  font-size: 13px;
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+}
+
+.historyDeleteBtn {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 2px;
+  border-radius: 3px;
+  opacity: 0;
+  transition: opacity var(--transition), color var(--transition);
+  display: flex;
+  align-items: center;
+}
+
+.historyItem:hover .historyDeleteBtn {
+  opacity: 1;
+}
+
+.historyDeleteBtn:hover {
+  color: var(--accent-error);
+}
+

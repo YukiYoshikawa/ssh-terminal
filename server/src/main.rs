@@ -1,23 +1,19 @@
+// Windows: hide console window when running as tray app
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
+mod config;
+mod server;
 mod ssh_session;
+mod tray;
 mod ws_handler;
 
-use axum::{
-    extract::WebSocketUpgrade,
-    response::IntoResponse,
-    routing::get,
-    Router,
-};
-use tower_http::cors::{Any, CorsLayer};
-use tracing::info;
-use ws_handler::handle_websocket;
+use config::ServerConfig;
+use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+use tokio::sync::{mpsc, watch};
+use tray::{TrayCommand, run_tray};
 
-async fn ws_route(ws: WebSocketUpgrade) -> impl IntoResponse {
-    ws.on_upgrade(handle_websocket)
-}
-
-#[tokio::main]
-async fn main() {
-    // Initialize structured logging
+fn main() {
+    // Initialize logging
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -25,23 +21,85 @@ async fn main() {
         )
         .init();
 
-    // CORS: allow any origin (dev-only)
-    let cors = CorsLayer::new()
-        .allow_origin(Any)
-        .allow_methods(Any)
-        .allow_headers(Any);
+    let mut cfg = ServerConfig::load();
+    let running = Arc::new(AtomicBool::new(true));
+    let (cmd_tx, mut cmd_rx) = mpsc::unbounded_channel::<TrayCommand>();
 
-    let app = Router::new()
-        .route("/ws", get(ws_route))
-        .layer(cors);
+    // Start tokio runtime in a background thread
+    let running_clone = running.clone();
+    let initial_port = cfg.port;
+    let initial_addr = cfg.bind_addr();
 
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:3001")
-        .await
-        .expect("Failed to bind port 3001");
+    std::thread::spawn(move || {
+        let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
+        rt.block_on(async move {
+            let (shutdown_tx, shutdown_rx) = watch::channel(false);
+            let mut current_shutdown_tx = shutdown_tx;
+            let mut current_addr = initial_addr;
 
-    info!("SSH-terminal proxy listening on ws://0.0.0.0:3001/ws");
+            // Start initial server
+            let mut server_handle = {
+                let addr = current_addr.clone();
+                let rx = current_shutdown_tx.subscribe();
+                Some(tokio::spawn(async move {
+                    server::run_server(addr, rx).await;
+                }))
+            };
 
-    axum::serve(listener, app)
-        .await
-        .expect("Server error");
+            // Process tray commands
+            while let Some(cmd) = cmd_rx.recv().await {
+                match cmd {
+                    TrayCommand::StartServer => {
+                        if server_handle.is_none() {
+                            let (tx, rx) = watch::channel(false);
+                            current_shutdown_tx = tx;
+                            let addr = current_addr.clone();
+                            server_handle = Some(tokio::spawn(async move {
+                                server::run_server(addr, rx).await;
+                            }));
+                            tracing::info!("Server started on {}", current_addr);
+                        }
+                    }
+                    TrayCommand::StopServer => {
+                        if let Some(handle) = server_handle.take() {
+                            current_shutdown_tx.send(true).ok();
+                            handle.await.ok();
+                            tracing::info!("Server stopped");
+                        }
+                    }
+                    TrayCommand::ChangePort(port) => {
+                        // Stop current server
+                        if let Some(handle) = server_handle.take() {
+                            current_shutdown_tx.send(true).ok();
+                            handle.await.ok();
+                        }
+                        // Update config
+                        let mut cfg = ServerConfig::load();
+                        cfg.port = port;
+                        cfg.save();
+                        current_addr = cfg.bind_addr();
+
+                        // Start on new port
+                        let (tx, rx) = watch::channel(false);
+                        current_shutdown_tx = tx;
+                        let addr = current_addr.clone();
+                        server_handle = Some(tokio::spawn(async move {
+                            server::run_server(addr, rx).await;
+                        }));
+                        tracing::info!("Server restarted on port {}", port);
+                    }
+                    TrayCommand::Quit => {
+                        if let Some(handle) = server_handle.take() {
+                            current_shutdown_tx.send(true).ok();
+                            handle.await.ok();
+                        }
+                        break;
+                    }
+                }
+            }
+        });
+    });
+
+    // Run tray on main thread (required by Windows)
+    run_tray(cmd_tx, running, initial_port);
 }

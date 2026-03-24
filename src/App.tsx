@@ -7,6 +7,7 @@ import { SessionPanel } from './components/SessionPanel';
 import { ConnectDialog } from './components/ConnectDialog';
 import { SearchBar } from './components/SearchBar';
 import { Terminal, type TerminalHandle } from './components/Terminal';
+import { saveToHistory } from './core/connectionHistory';
 import styles from './App.module.css';
 
 const MAX_SESSIONS = 10;
@@ -50,7 +51,7 @@ export default function App() {
   }, []);
 
   const handleConnect = useCallback(
-    (info: SshConnectionInfo) => {
+    async (info: SshConnectionInfo) => {
       if (sessions.length >= MAX_SESSIONS) {
         setConnectError(`最大 ${MAX_SESSIONS} セッションまでです`);
         return;
@@ -68,6 +69,7 @@ export default function App() {
               setConnecting(false);
               setShowConnectDialog(false);
               setConnectError(undefined);
+              saveToHistory(info);
               // Focus terminal after state update
               setTimeout(() => {
                 terminalRefs.current.get(session.id)?.focus();
@@ -75,9 +77,15 @@ export default function App() {
               break;
             }
             case 'data': {
-              // Server sends base64-encoded data
-              const decoded = atob(msg.data);
-              terminalRefs.current.get(session.id)?.write(decoded);
+              // Server sends base64-encoded binary data
+              // Decode base64 → Uint8Array → UTF-8 string
+              const binary = atob(msg.data);
+              const bytes = new Uint8Array(binary.length);
+              for (let i = 0; i < binary.length; i++) {
+                bytes[i] = binary.charCodeAt(i);
+              }
+              const text = new TextDecoder('utf-8').decode(bytes);
+              terminalRefs.current.get(session.id)?.write(text);
               break;
             }
             case 'error': {
@@ -100,28 +108,24 @@ export default function App() {
         }
       );
 
-      ws.connect(getWsUrl());
       wsRefs.current.set(session.id, ws);
-
-      // Add session and set as active
       setSessions((prev) => [...prev, session]);
       setActiveSessionId(session.id);
 
-      // Send connect message once WebSocket opens — poll readyState briefly
-      const sendConnect = () => {
-        if (ws.isConnected) {
-          ws.send({
-            type: 'connect',
-            host: info.host,
-            port: info.port,
-            username: info.username,
-            password: info.password,
-          });
-        } else {
-          setTimeout(sendConnect, 50);
-        }
-      };
-      setTimeout(sendConnect, 50);
+      try {
+        await ws.connect(getWsUrl());
+        ws.send({
+          type: 'connect',
+          host: info.host,
+          port: info.port,
+          username: info.username,
+          password: info.password,
+        });
+      } catch {
+        updateSession(session.id, { status: 'error', errorMessage: 'プロキシサーバーに接続できません' });
+        setConnecting(false);
+        setConnectError('プロキシサーバーに接続できません。サーバーが起動しているか確認してください。');
+      }
     },
     [sessions.length, connecting, showConnectDialog, updateSession]
   );
@@ -134,6 +138,24 @@ export default function App() {
       updateSession(sessionId, { status: 'disconnected' });
     },
     [updateSession]
+  );
+
+  const handleRemoveSession = useCallback(
+    (sessionId: string) => {
+      const ws = wsRefs.current.get(sessionId);
+      ws?.close();
+      wsRefs.current.delete(sessionId);
+      terminalRefs.current.delete(sessionId);
+      setSessions((prev) => prev.filter((s) => s.id !== sessionId));
+      setActiveSessionId((prev) => {
+        if (prev === sessionId) {
+          const remaining = sessions.filter((s) => s.id !== sessionId);
+          return remaining.length > 0 ? remaining[0].id : null;
+        }
+        return prev;
+      });
+    },
+    [sessions]
   );
 
   const handleSessionSelect = useCallback((sessionId: string) => {
@@ -185,10 +207,19 @@ export default function App() {
             sessions={sessions}
             activeId={activeSessionId}
             onSelect={handleSessionSelect}
-            onDisconnect={handleDisconnect}
+            onDisconnect={handleRemoveSession}
             onNew={handleNewConnection}
             onCollapse={() => setLeftPanelOpen(false)}
           />
+        )}
+        {!leftPanelOpen && (
+          <button
+            className={styles.expandBtn}
+            onClick={() => setLeftPanelOpen(true)}
+            title="Sessions パネルを表示"
+          >
+            ▶
+          </button>
         )}
         <div className={styles.terminalArea}>
           <SearchBar
@@ -214,7 +245,13 @@ export default function App() {
               onReconnect={() => handleReconnect(s.id)}
               onData={(data) => {
                 const ws = wsRefs.current.get(s.id);
-                ws?.send({ type: 'data', data });
+                // Encode user input as base64 (UTF-8 bytes)
+                const encoded = btoa(
+                  Array.from(new TextEncoder().encode(data))
+                    .map((b) => String.fromCharCode(b))
+                    .join('')
+                );
+                ws?.send({ type: 'data', data: encoded });
               }}
               onResize={(cols, rows) => {
                 const ws = wsRefs.current.get(s.id);
