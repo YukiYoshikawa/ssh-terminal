@@ -110,6 +110,8 @@ export default function App() {
           username: info.username,
           password: info.password,
           profile: info.profile,
+          category: info.category,
+          group: info.group,
           command: info.command,
         });
       } catch {
@@ -186,6 +188,8 @@ export default function App() {
           username: info.username,
           password: info.password,
           profile: info.profile,
+          category: info.category,
+          group: info.group,
           command: info.command,
         });
       } catch {
@@ -217,13 +221,27 @@ export default function App() {
     const params = new URLSearchParams(window.location.search);
     const host = params.get('host');
     const profile = params.get('profile');
+    const category = params.get('category');
+    const group = params.get('group');
     const targets = params.get('targets');
 
-    if (host && profile) {
-      // Connect to bastion host
+    // category auth (primary) — group is optional, falls back to _default
+    if (host && category) {
+      const baseInfo: SshConnectionInfo = { host, port: 22, category, group: group || undefined };
+      const label = group ? `${category}/${group}@${host}` : `${category}@${host}`;
+      connectWithInfo(baseInfo, label);
+
+      if (targets) {
+        const targetList = targets.split(',').map((t) => t.trim()).filter(Boolean);
+        for (const target of targetList) {
+          connectWithInfo({ ...baseInfo, command: `ssh ${target}\n` }, target);
+        }
+      }
+    }
+    // profile auth (fallback)
+    else if (host && profile) {
       connectWithProfile(host, profile, undefined, `${profile}@${host}`);
 
-      // Connect to each target via bastion
       if (targets) {
         const targetList = targets.split(',').map((t) => t.trim()).filter(Boolean);
         for (const target of targetList) {

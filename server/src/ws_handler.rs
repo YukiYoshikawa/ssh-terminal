@@ -21,6 +21,8 @@ pub enum ClientMessage {
         username: Option<String>,
         password: Option<String>,
         profile: Option<String>,
+        category: Option<String>,      // auth lookup: category
+        group: Option<String>,        // auth lookup: group (optional, falls back to _default)
         targets: Option<Vec<String>>, // jump host targets
         command: Option<String>,      // auto-send command after shell starts
         cols: Option<u32>,
@@ -102,48 +104,29 @@ pub async fn handle_websocket(socket: WebSocket, config: Arc<ServerConfig>) {
             username,
             password,
             profile,
+            category,
+            group,
             targets: _,
             command,
             cols,
             rows,
         } => {
-            // Resolve credentials: profile takes precedence if given
-            let (resolved_user, resolved_pass, resolved_port) = if let Some(profile_name) = profile {
-                match config.get_profile(&profile_name) {
-                    Some(p) => (p.username.clone(), p.password.clone(), port.unwrap_or(p.port)),
-                    None => {
-                        let _ = ws_tx
-                            .send(encode(&ServerMessage::Error {
-                                message: format!("Profile '{}' not found", profile_name),
-                            }))
-                            .await;
-                        return;
-                    }
+            let default_port = port.unwrap_or(22);
+            let (resolved_user, resolved_pass, resolved_port) = match config.resolve_credentials(
+                category.as_deref(),
+                group.as_deref(),
+                profile.as_deref(),
+                username.as_deref(),
+                password.as_deref(),
+                default_port,
+            ) {
+                Ok(creds) => creds,
+                Err(msg) => {
+                    let _ = ws_tx
+                        .send(encode(&ServerMessage::Error { message: msg }))
+                        .await;
+                    return;
                 }
-            } else {
-                let u = match username {
-                    Some(u) => u,
-                    None => {
-                        let _ = ws_tx
-                            .send(encode(&ServerMessage::Error {
-                                message: "username or profile required".into(),
-                            }))
-                            .await;
-                        return;
-                    }
-                };
-                let p = match password {
-                    Some(p) => p,
-                    None => {
-                        let _ = ws_tx
-                            .send(encode(&ServerMessage::Error {
-                                message: "password or profile required".into(),
-                            }))
-                            .await;
-                        return;
-                    }
-                };
-                (u, p, port.unwrap_or(22))
             };
 
             (
