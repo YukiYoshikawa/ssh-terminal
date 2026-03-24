@@ -1,0 +1,229 @@
+use axum::extract::ws::{Message, WebSocket};
+use base64::{engine::general_purpose::STANDARD, Engine as _};
+use futures::{SinkExt, StreamExt};
+use serde::{Deserialize, Serialize};
+use tokio::sync::mpsc;
+use tracing::{error, info, warn};
+
+use crate::ssh_session::SshSession;
+
+// ── Protocol types ──────────────────────────────────────────────────────────
+
+/// Messages sent from the browser to the server.
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum ClientMessage {
+    Connect {
+        host: String,
+        port: Option<u16>,
+        username: String,
+        password: String,
+        cols: Option<u32>,
+        rows: Option<u32>,
+    },
+    Data {
+        data: String,
+    },
+    Resize {
+        cols: u32,
+        rows: u32,
+    },
+    Disconnect,
+}
+
+/// Messages sent from the server to the browser.
+#[derive(Debug, Serialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum ServerMessage {
+    Connected,
+    Data { data: String },
+    Error { message: String },
+    Disconnected,
+}
+
+fn encode(msg: &ServerMessage) -> Message {
+    Message::Text(
+        serde_json::to_string(msg)
+            .unwrap_or_else(|_| r#"{"type":"error","message":"serialization failed"}"#.to_string())
+            .into(),
+    )
+}
+
+// ── Handler ──────────────────────────────────────────────────────────────────
+
+pub async fn handle_websocket(socket: WebSocket) {
+    let (mut ws_tx, mut ws_rx) = socket.split();
+
+    // ── Step 1: Wait for the initial "connect" message ───────────────────
+    let connect_msg = loop {
+        match ws_rx.next().await {
+            Some(Ok(Message::Text(text))) => {
+                match serde_json::from_str::<ClientMessage>(&text) {
+                    Ok(msg @ ClientMessage::Connect { .. }) => break msg,
+                    Ok(other) => {
+                        warn!("Expected connect, got: {:?}", other);
+                        let _ = ws_tx
+                            .send(encode(&ServerMessage::Error {
+                                message: "First message must be 'connect'".into(),
+                            }))
+                            .await;
+                    }
+                    Err(e) => {
+                        let _ = ws_tx
+                            .send(encode(&ServerMessage::Error {
+                                message: format!("JSON parse error: {}", e),
+                            }))
+                            .await;
+                    }
+                }
+            }
+            Some(Ok(Message::Close(_))) | None => {
+                info!("WebSocket closed before connect");
+                return;
+            }
+            Some(Ok(_)) => {} // ping/binary — ignore
+            Some(Err(e)) => {
+                error!("WebSocket error: {}", e);
+                return;
+            }
+        }
+    };
+
+    // ── Step 2: Establish SSH connection ─────────────────────────────────
+    let (host, port, username, password, cols, rows) = match connect_msg {
+        ClientMessage::Connect {
+            host,
+            port,
+            username,
+            password,
+            cols,
+            rows,
+        } => (
+            host,
+            port.unwrap_or(22),
+            username,
+            password,
+            cols.unwrap_or(80),
+            rows.unwrap_or(24),
+        ),
+        _ => unreachable!(),
+    };
+
+    let session = match SshSession::connect(&host, port, &username, &password, cols, rows).await {
+        Ok(s) => s,
+        Err(e) => {
+            error!("SSH connect failed: {}", e);
+            let _ = ws_tx
+                .send(encode(&ServerMessage::Error {
+                    message: format!("SSH connection failed: {}", e),
+                }))
+                .await;
+            return;
+        }
+    };
+
+    // Notify the browser that we're connected
+    if ws_tx.send(encode(&ServerMessage::Connected)).await.is_err() {
+        session.close().await;
+        return;
+    }
+
+    info!("SSH session established for {}@{}:{}", username, host, port);
+
+    // ── Step 3: Channels ─────────────────────────────────────────────────
+    // SSH output → WebSocket
+    let (ssh_out_tx, mut ssh_out_rx) = mpsc::unbounded_channel::<Vec<u8>>();
+    // Commands from WebSocket input → SSH session owner task
+    let (cmd_tx, mut cmd_rx) = mpsc::unbounded_channel::<SshCommand>();
+
+    // ── SSH owner task: drives reads AND writes ──────────────────────────
+    let ssh_task = tokio::spawn(async move {
+        let mut session = session;
+        loop {
+            tokio::select! {
+                // Process SSH output
+                () = session.run_reader(ssh_out_tx.clone()) => {
+                    // run_reader returned → channel closed
+                    break;
+                }
+                // Process input commands
+                cmd = cmd_rx.recv() => {
+                    match cmd {
+                        Some(SshCommand::Data(bytes)) => {
+                            if let Err(e) = session.send_data(&bytes).await {
+                                error!("SSH send_data error: {}", e);
+                                break;
+                            }
+                        }
+                        Some(SshCommand::Resize(c, r)) => {
+                            let _ = session.resize(c, r).await;
+                        }
+                        Some(SshCommand::Close) | None => {
+                            session.close().await;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        // Drop ssh_out_tx so the write task terminates
+    });
+
+    // ── WebSocket write task: SSH output → browser ───────────────────────
+    let ws_write_task = tokio::spawn(async move {
+        while let Some(bytes) = ssh_out_rx.recv().await {
+            let encoded = STANDARD.encode(&bytes);
+            if ws_tx
+                .send(encode(&ServerMessage::Data { data: encoded }))
+                .await
+                .is_err()
+            {
+                break;
+            }
+        }
+        let _ = ws_tx.send(encode(&ServerMessage::Disconnected)).await;
+    });
+
+    // ── Step 4: WebSocket → SSH (main loop) ──────────────────────────────
+    while let Some(msg) = ws_rx.next().await {
+        match msg {
+            Ok(Message::Text(text)) => {
+                match serde_json::from_str::<ClientMessage>(&text) {
+                    Ok(ClientMessage::Data { data }) => {
+                        // data is base64 from the browser
+                        let bytes = STANDARD.decode(&data).unwrap_or_else(|_| data.into_bytes());
+                        let _ = cmd_tx.send(SshCommand::Data(bytes));
+                    }
+                    Ok(ClientMessage::Resize { cols, rows }) => {
+                        let _ = cmd_tx.send(SshCommand::Resize(cols, rows));
+                    }
+                    Ok(ClientMessage::Disconnect) | Ok(ClientMessage::Connect { .. }) => {
+                        break;
+                    }
+                    Err(e) => warn!("JSON parse error: {}", e),
+                }
+            }
+            Ok(Message::Binary(bytes)) => {
+                let _ = cmd_tx.send(SshCommand::Data(bytes.to_vec()));
+            }
+            Ok(Message::Close(_)) => break,
+            Ok(_) => {}
+            Err(e) => {
+                error!("WebSocket error: {}", e);
+                break;
+            }
+        }
+    }
+
+    // ── Step 5: Clean up ─────────────────────────────────────────────────
+    let _ = cmd_tx.send(SshCommand::Close);
+    let _ = tokio::join!(ssh_task, ws_write_task);
+    info!("WebSocket session closed for {}@{}:{}", username, host, port);
+}
+
+#[derive(Debug)]
+enum SshCommand {
+    Data(Vec<u8>),
+    Resize(u32, u32),
+    Close,
+}

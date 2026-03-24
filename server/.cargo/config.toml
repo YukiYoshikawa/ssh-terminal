@@ -1,0 +1,15 @@
+[build]
+# Use the GNU toolchain to avoid the MSVC link.exe conflict on Windows
+# (Git Bash's /usr/bin/link.exe shadows MSVC link.exe).
+# The self-contained linker is in the GNU toolchain's bin/self-contained directory.
+target = "x86_64-pc-windows-gnu"
+
+[target.x86_64-pc-windows-gnu]
+linker = "C:\\Users\\yukiv\\.rustup\\toolchains\\stable-x86_64-pc-windows-gnu\\lib\\rustlib\\x86_64-pc-windows-gnu\\bin\\self-contained\\x86_64-w64-mingw32-gcc.exe"
+
+# NOTE: The self-contained toolchain lacks a GNU assembler (as.exe).
+# A minimal Python-based assembler is provided at:
+#   ...self-contained/as  (shell wrapper)
+#   ...self-contained/as.py (Python COFF generator)
+# This handles the .idata assembly that dlltool generates for Windows PE import libs.
+# Run setup: scripts/setup-gnu-assembler.sh (or see docs for manual setup)
