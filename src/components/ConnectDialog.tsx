@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import type { SshConnectionInfo } from '../types/ssh';
+import { generateEd25519KeyPair } from '../core/keygen';
 import styles from './ConnectDialog.module.css';
 
 interface ConnectDialogProps {
@@ -10,12 +11,28 @@ interface ConnectDialogProps {
   connecting?: boolean;
 }
 
+function downloadFile(content: string, filename: string, mimeType: string) {
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 export function ConnectDialog({ open, onConnect, onCancel, error, connecting }: ConnectDialogProps) {
   const [host, setHost] = useState('');
   const [port, setPort] = useState('22');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [validationError, setValidationError] = useState('');
+
+  // Keygen state
+  const [generatedPublicKey, setGeneratedPublicKey] = useState('');
+  const [generatedPrivateKey, setGeneratedPrivateKey] = useState('');
+  const [keygenLoading, setKeygenLoading] = useState(false);
+  const [keygenError, setKeygenError] = useState('');
 
   // Reset form when dialog opens
   useEffect(() => {
@@ -25,6 +42,9 @@ export function ConnectDialog({ open, onConnect, onCancel, error, connecting }: 
       setUsername('');
       setPassword('');
       setValidationError('');
+      setGeneratedPublicKey('');
+      setGeneratedPrivateKey('');
+      setKeygenError('');
     }
   }, [open]);
 
@@ -47,6 +67,30 @@ export function ConnectDialog({ open, onConnect, onCancel, error, connecting }: 
       username: username.trim(),
       password,
     });
+  };
+
+  const handleGenerateKey = async () => {
+    setKeygenLoading(true);
+    setKeygenError('');
+    setGeneratedPublicKey('');
+    setGeneratedPrivateKey('');
+    try {
+      const { privateKey, publicKey } = await generateEd25519KeyPair();
+      setGeneratedPublicKey(publicKey);
+      setGeneratedPrivateKey(privateKey);
+    } catch (err) {
+      setKeygenError('鍵の生成に失敗しました: ' + String(err));
+    } finally {
+      setKeygenLoading(false);
+    }
+  };
+
+  const handleDownloadPrivateKey = () => {
+    downloadFile(generatedPrivateKey, 'id_ed25519', 'application/octet-stream');
+  };
+
+  const handleDownloadPublicKey = () => {
+    downloadFile(generatedPublicKey, 'id_ed25519.pub', 'text/plain');
   };
 
   const displayError = validationError || error;
@@ -132,6 +176,54 @@ export function ConnectDialog({ open, onConnect, onCancel, error, connecting }: 
             </button>
           </div>
         </form>
+
+        {/* SSH Key Generation Section */}
+        <div className={styles.keygenSection}>
+          <div className={styles.keygenHeader}>
+            <span className={styles.keygenTitle}>SSH鍵生成 (Ed25519)</span>
+            <button
+              type="button"
+              className={styles.keygenBtn}
+              onClick={handleGenerateKey}
+              disabled={keygenLoading || !!connecting}
+            >
+              {keygenLoading && <span className={styles.spinner} />}
+              {keygenLoading ? '生成中...' : 'SSH鍵を生成'}
+            </button>
+          </div>
+
+          {keygenError && (
+            <div className={styles.error}>{keygenError}</div>
+          )}
+
+          {generatedPublicKey && (
+            <div className={styles.keyResult}>
+              <label className={styles.label}>公開鍵</label>
+              <textarea
+                className={styles.keyTextarea}
+                readOnly
+                value={generatedPublicKey}
+                rows={2}
+              />
+              <div className={styles.keyActions}>
+                <button
+                  type="button"
+                  className={styles.downloadBtn}
+                  onClick={handleDownloadPrivateKey}
+                >
+                  秘密鍵をダウンロード
+                </button>
+                <button
+                  type="button"
+                  className={styles.downloadBtn}
+                  onClick={handleDownloadPublicKey}
+                >
+                  公開鍵をダウンロード
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

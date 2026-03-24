@@ -161,3 +161,93 @@
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
+
+/* SSH Key Generation Section */
+.keygenSection {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.keygenHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.keygenTitle {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.keygenBtn {
+  padding: 5px 12px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition), border-color var(--transition);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.keygenBtn:hover:not(:disabled) {
+  background: var(--bg-panel);
+  color: var(--text-primary);
+  border-color: var(--accent);
+}
+
+.keygenBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.keyResult {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.keyTextarea {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 7px 10px;
+  color: var(--text-primary);
+  font-size: 11px;
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  outline: none;
+  resize: none;
+  width: 100%;
+  word-break: break-all;
+}
+
+.keyActions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.downloadBtn {
+  padding: 5px 12px;
+  background: rgba(74, 158, 255, 0.12);
+  border: 1px solid rgba(74, 158, 255, 0.3);
+  border-radius: 4px;
+  color: var(--accent);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background var(--transition), border-color var(--transition);
+  flex: 1;
+}
+
+.downloadBtn:hover {
+  background: rgba(74, 158, 255, 0.22);
+  border-color: rgba(74, 158, 255, 0.5);
+}

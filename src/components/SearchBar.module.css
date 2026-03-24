@@ -1,0 +1,115 @@
+.bar {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-top: none;
+  border-right: none;
+  border-radius: 0 0 0 6px;
+  padding: 5px 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+
+.searchIcon {
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.input {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 8px;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-family: var(--font-ui);
+  outline: none;
+  width: 220px;
+  transition: border-color var(--transition);
+}
+
+.input:focus {
+  border-color: var(--accent);
+}
+
+.input::placeholder {
+  color: var(--text-secondary);
+  opacity: 0.5;
+}
+
+.count {
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  min-width: 48px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.noMatch {
+  color: var(--accent-error, #ff6b6b);
+}
+
+.iconBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px 6px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-family: var(--font-mono, monospace);
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition), border-color var(--transition);
+  height: 24px;
+  min-width: 24px;
+  flex-shrink: 0;
+}
+
+.iconBtn:hover:not(:disabled) {
+  background: var(--bg-panel);
+  color: var(--text-primary);
+  border-color: var(--border);
+}
+
+.iconBtn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.iconBtn.active {
+  background: rgba(74, 158, 255, 0.15);
+  color: var(--accent);
+  border-color: rgba(74, 158, 255, 0.4);
+}
+
+.closeBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px;
+  background: transparent;
+  border: none;
+  border-radius: 3px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition);
+  height: 24px;
+  width: 24px;
+  flex-shrink: 0;
+  margin-left: 2px;
+}
+
+.closeBtn:hover {
+  background: rgba(255, 107, 107, 0.15);
+  color: var(--accent-error, #ff6b6b);
+}

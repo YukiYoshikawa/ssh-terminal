@@ -1,10 +1,11 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import type { SshSession, SshConnectionInfo } from './types/ssh';
 import { SshWebSocket } from './core/websocket';
 import { createSession, getWsUrl } from './core/sessionManager';
 import { Header } from './components/Header';
 import { SessionPanel } from './components/SessionPanel';
 import { ConnectDialog } from './components/ConnectDialog';
+import { SearchBar } from './components/SearchBar';
 import { Terminal, type TerminalHandle } from './components/Terminal';
 import styles from './App.module.css';
 
@@ -27,8 +28,22 @@ export default function App() {
   const [connecting, setConnecting] = useState(false);
   const [leftPanelOpen, setLeftPanelOpen] = useState(true);
 
+  const [searchVisible, setSearchVisible] = useState(false);
+
   const terminalRefs = useRef(new Map<string, TerminalHandle>());
   const wsRefs = useRef(new Map<string, SshWebSocket>());
+
+  // Ctrl+Shift+F opens search bar
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.shiftKey && e.key === 'F') {
+        e.preventDefault();
+        setSearchVisible((prev) => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   const updateSession = useCallback((id: string, patch: Partial<SshSession>) => {
     setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, ...patch } : s)));
@@ -176,6 +191,14 @@ export default function App() {
           />
         )}
         <div className={styles.terminalArea}>
+          <SearchBar
+            visible={searchVisible}
+            onClose={() => setSearchVisible(false)}
+            getBuffer={() => {
+              if (!activeSessionId) return '';
+              return terminalRefs.current.get(activeSessionId)?.getBuffer() ?? '';
+            }}
+          />
           {sessions.map((s) => (
             <Terminal
               key={s.id}
