@@ -17,6 +17,8 @@ export function ConnectDialog({ open, onConnect, onCancel, error, connecting }: 
   const [port, setPort] = useState('22');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [profile, setProfile] = useState('');
+  const [profiles, setProfiles] = useState<string[]>([]);
   const [validationError, setValidationError] = useState('');
 
   // History state
@@ -29,15 +31,28 @@ export function ConnectDialog({ open, onConnect, onCancel, error, connecting }: 
       setPort('22');
       setUsername('');
       setPassword('');
+      setProfile('');
       setValidationError('');
       setHistory(loadHistory());
+
+      // Fetch available profiles from server
+      fetch('/api/profiles')
+        .then((res) => res.ok ? res.json() : null)
+        .then((data) => {
+          if (data && Array.isArray(data.profiles)) {
+            setProfiles(data.profiles as string[]);
+          }
+        })
+        .catch(() => {
+          // profiles endpoint may not exist, that's fine
+        });
     }
   }, [open]);
 
   const handleSelectHistory = (conn: SavedConnection) => {
     setHost(conn.host);
     setPort(String(conn.port));
-    setUsername(conn.username);
+    setUsername(conn.username ?? '');
     setPassword('');
   };
 
@@ -48,23 +63,34 @@ export function ConnectDialog({ open, onConnect, onCancel, error, connecting }: 
 
   if (!open) return null;
 
+  const useProfile = profiles.length > 0 && profile !== '';
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!host.trim()) {
       setValidationError('ホストは必須です');
       return;
     }
-    if (!username.trim()) {
-      setValidationError('ユーザー名は必須です');
+    if (!useProfile && !username.trim()) {
+      setValidationError('ユーザー名は必須です（またはプロファイルを選択してください）');
       return;
     }
     setValidationError('');
-    onConnect({
-      host: host.trim(),
-      port: parseInt(port, 10) || 22,
-      username: username.trim(),
-      password,
-    });
+
+    if (useProfile) {
+      onConnect({
+        host: host.trim(),
+        port: parseInt(port, 10) || 22,
+        profile: profile,
+      });
+    } else {
+      onConnect({
+        host: host.trim(),
+        port: parseInt(port, 10) || 22,
+        username: username.trim(),
+        password,
+      });
+    }
   };
 
   const displayError = validationError || error;
@@ -134,28 +160,50 @@ export function ConnectDialog({ open, onConnect, onCancel, error, connecting }: 
                 />
               </div>
             </div>
-            <div className={styles.field}>
-              <label className={styles.label}>ユーザー名</label>
-              <input
-                className={styles.input}
-                type="text"
-                placeholder="username"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                disabled={connecting}
-              />
-            </div>
-            <div className={styles.field}>
-              <label className={styles.label}>パスワード</label>
-              <input
-                className={styles.input}
-                type="password"
-                placeholder="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                disabled={connecting}
-              />
-            </div>
+
+            {profiles.length > 0 && (
+              <div className={styles.field}>
+                <label className={styles.label}>プロファイル</label>
+                <select
+                  className={styles.input}
+                  value={profile}
+                  onChange={(e) => setProfile(e.target.value)}
+                  disabled={connecting}
+                >
+                  <option value="">-- プロファイルを選択 (または手動入力) --</option>
+                  {profiles.map((p) => (
+                    <option key={p} value={p}>{p}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {!useProfile && (
+              <>
+                <div className={styles.field}>
+                  <label className={styles.label}>ユーザー名</label>
+                  <input
+                    className={styles.input}
+                    type="text"
+                    placeholder="username"
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                    disabled={connecting}
+                  />
+                </div>
+                <div className={styles.field}>
+                  <label className={styles.label}>パスワード</label>
+                  <input
+                    className={styles.input}
+                    type="password"
+                    placeholder="password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    disabled={connecting}
+                  />
+                </div>
+              </>
+            )}
           </div>
 
           {displayError && (

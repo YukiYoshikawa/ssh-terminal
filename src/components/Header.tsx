@@ -1,14 +1,18 @@
-import { Plus, Maximize2, Minimize2 } from 'lucide-react';
+import { Plus, Maximize2, Minimize2, LayoutGrid, Rows3 } from 'lucide-react';
 import { useState } from 'react';
+import type { LayoutMode } from '../types/ssh';
 import styles from './Header.module.css';
 
 interface HeaderProps {
   activeLabel?: string;
   onNew: () => void;
   onToggleFullscreen?: () => void;
+  layoutMode?: LayoutMode;
+  onToggleLayout?: () => void;
+  showLayoutToggle?: boolean;
 }
 
-export function Header({ activeLabel, onNew, onToggleFullscreen }: HeaderProps) {
+export function Header({ activeLabel, onNew, onToggleFullscreen, layoutMode, onToggleLayout, showLayoutToggle }: HeaderProps) {
   const [isFullscreen, setIsFullscreen] = useState(false);
 
   const handleFullscreen = () => {
@@ -32,6 +36,15 @@ export function Header({ activeLabel, onNew, onToggleFullscreen }: HeaderProps) 
         {activeLabel ?? ''}
       </div>
       <div className={styles.actions}>
+        {showLayoutToggle && onToggleLayout && (
+          <button
+            className={styles.iconBtn}
+            onClick={onToggleLayout}
+            title={layoutMode === 'grid' ? 'Switch to Tab mode' : 'Switch to Grid mode'}
+          >
+            {layoutMode === 'grid' ? <Rows3 size={14} /> : <LayoutGrid size={14} />}
+          </button>
+        )}
         <button className={styles.newBtn} onClick={onNew} title="New Connection">
           <Plus size={14} />
           New

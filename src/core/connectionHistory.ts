@@ -6,23 +6,24 @@ const MAX_HISTORY = 20;
 export interface SavedConnection {
   host: string;
   port: number;
-  username: string;
+  username?: string;
   label: string;
   lastUsed: number;
 }
 
 function toSaved(info: SshConnectionInfo): SavedConnection {
+  const username = info.username ?? info.profile ?? '';
   return {
     host: info.host,
     port: info.port,
-    username: info.username,
-    label: `${info.username}@${info.host}:${info.port}`,
+    username,
+    label: `${username}@${info.host}:${info.port}`,
     lastUsed: Date.now(),
   };
 }
 
 function key(c: SavedConnection): string {
-  return `${c.username}@${c.host}:${c.port}`;
+  return `${c.username ?? ''}@${c.host}:${c.port}`;
 }
 
 export function loadHistory(): SavedConnection[] {

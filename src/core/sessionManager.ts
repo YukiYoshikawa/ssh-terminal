@@ -2,10 +2,20 @@ import type { SshSession, SshConnectionInfo } from '../types/ssh';
 
 let nextId = 1;
 
-export function createSession(info: SshConnectionInfo): SshSession {
+export function createSession(info: SshConnectionInfo, labelOverride?: string): SshSession {
+  let label: string;
+  if (labelOverride) {
+    label = labelOverride;
+  } else if (info.username) {
+    label = `${info.username}@${info.host}`;
+  } else if (info.profile) {
+    label = `${info.profile}@${info.host}`;
+  } else {
+    label = info.host;
+  }
   return {
     id: `session-${nextId++}`,
-    label: `${info.username}@${info.host}`,
+    label,
     connectionInfo: info,
     status: 'connecting',
   };
