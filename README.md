@@ -14,11 +14,14 @@
 
 ## Quick Start
 
-### Prerequisites
+### Prerequisites (Windows)
 
 - [Node.js](https://nodejs.org/) (LTS)
 - [Rust](https://rustup.rs/)
-- [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) (Windows, C++ workload)
+- [Visual Studio Build Tools 2022](https://visualstudio.microsoft.com/visual-cpp-build-tools/) — C++ ワークロードを選択してインストール。Rust の MSVC ターゲットでのコンパイルに必要
+  ```powershell
+  winget install Microsoft.VisualStudio.2022.BuildTools --override "--add Microsoft.VisualStudio.Workload.VCTools --includeRecommended --passive"
+  ```
 
 ### Build
 
